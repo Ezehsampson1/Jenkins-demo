@@ -1,0 +1,64 @@
+pipeline {
+    agent any
+
+    environment {
+        AWS_REGION     = "us-east-1"
+        AWS_ACCOUNT_ID = 927788617166
+        APP_NAME       = "myapp"
+        ECR_REPO       = "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${APP_NAME}"
+    }
+
+    stages {
+        stage('Checkout') {
+            steps {
+                git branch: 'main', url: 'https://github.com/Ezehsampson1/myapp.git'
+            }
+        }
+
+        stage('Build JAR') {
+            steps {
+                sh 'mvn clean package -DskipTests'
+            }
+        }
+
+        stage('Docker Build') {
+            steps {
+                script {
+                    sh """
+                    aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com
+
+                    docker build -t $APP_NAME .
+                    docker tag $APP_NAME:latest $ECR_REPO:latest
+                    """
+                }
+            }
+        }
+
+        stage('Push to ECR') {
+            steps {
+                sh "docker push $ECR_REPO:latest"
+            }
+        }
+
+        stage('Deploy to ECS Fargate') {
+            steps {
+                sh """
+                aws ecs update-service \
+                  --cluster ${APP_NAME}-cluster \
+                  --service ${APP_NAME}-service \
+                  --force-new-deployment \
+                  --region $AWS_REGION
+                """
+            }
+        }
+    }
+
+    post {
+        success {
+            echo "✅ Deployment successful!"
+        }
+        failure {
+            echo "❌ Deployment failed. Check logs."
+        }
+    }
+}
